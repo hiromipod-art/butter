@@ -1,0 +1,338 @@
+<title>バターまわし</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+/* layout: one-screen stovetop. HUD strip on top, the pan (a grid of butter-sized bits) centered over a gas-blue burner glow, controls at the bottom */
+:root{
+  --bg:#13110d; --panel:#1d1a14; --line:#2f2a21;
+  --fg:#f2e9d1; --muted:#998e74;
+  --butter:#ffd24a; --flame:#4b7cff;
+  --display:"DotGothic16", ui-monospace, "Courier New", monospace;
+  --body:"Zen Kaku Gothic New", "Hiragino Sans", system-ui, sans-serif;
+  color-scheme:dark;
+}
+html{box-sizing:border-box;height:100%}
+*,*::before,*::after{box-sizing:inherit}
+[hidden]{display:none!important}
+body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--body);overflow:hidden;-webkit-user-select:none;user-select:none}
+.app{height:100%;max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:10px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px}
+.hud{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;align-items:center}
+h1{margin:0;font-family:var(--display);font-weight:400;font-size:1.6rem;letter-spacing:.06em;color:var(--butter);line-height:1}
+.stats{display:flex;gap:14px;justify-content:flex-end;flex-wrap:wrap;min-width:0}
+.stat{display:grid;gap:3px;min-width:84px}
+.stat .lab{font-size:.68rem;letter-spacing:.12em;color:var(--muted)}
+.stat .val{font-family:var(--display);font-size:1.05rem;font-variant-numeric:tabular-nums}
+.bar{height:6px;background:var(--line);display:flex}
+.bar i{display:block;height:100%;background:var(--butter);width:0%}
+.bar.left i{background:#e9e0c4}
+.stage{flex:1;min-height:0;position:relative;display:grid;place-items:center;perspective:900px;touch-action:none;cursor:grab}
+.stage:active{cursor:grabbing}
+.glow{position:absolute;pointer-events:none;border-radius:50%;
+  background:radial-gradient(circle, transparent 42%, color-mix(in srgb,var(--flame) 55%,transparent) 50%, color-mix(in srgb,var(--flame) 18%,transparent) 58%, transparent 68%);
+  filter:blur(6px);animation:flick 2.4s ease-in-out infinite}
+@keyframes flick{50%{opacity:.75}}
+.tilt{transform-style:preserve-3d;will-change:transform}
+canvas{display:block;image-rendering:pixelated}
+.overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.card{pointer-events:auto;background:color-mix(in srgb,var(--panel) 92%,transparent);border:2px solid var(--line);
+  padding:20px 22px;max-width:320px;display:grid;gap:12px;text-align:left}
+.card h2{margin:0;font-family:var(--display);font-weight:400;font-size:1.4rem;color:var(--butter);text-wrap:balance}
+.card p{margin:0;line-height:1.7;font-size:.9rem;color:var(--fg)}
+.card .big{font-family:var(--display);font-size:2rem;font-variant-numeric:tabular-nums}
+.card .sub{color:var(--muted);font-size:.8rem}
+button{font-family:var(--display);font-size:1rem;background:var(--butter);color:#2a2008;border:0;padding:10px 16px;cursor:pointer;
+  box-shadow:0 4px 0 #a67c12;transition:transform .08s, box-shadow .08s}
+button:active{transform:translateY(3px);box-shadow:0 1px 0 #a67c12}
+button:focus-visible{outline:2px solid var(--fg);outline-offset:3px}
+button.ghost{background:transparent;color:var(--fg);box-shadow:inset 0 0 0 2px var(--line)}
+button.ghost:active{transform:none}
+button.link{background:none;box-shadow:none;padding:4px 0 0;font-family:var(--body);font-size:.8rem;color:var(--butter);text-decoration:underline;text-underline-offset:3px;text-align:left}
+button.link:active{transform:none}
+.foot{display:flex;align-items:center;gap:14px}
+.level{width:52px;height:52px;flex:none;border-radius:50%;border:2px solid var(--line);position:relative;background:var(--panel)}
+.level::before,.level::after{content:"";position:absolute;background:var(--line)}
+.level::before{left:50%;top:6px;bottom:6px;width:1px}
+.level::after{top:50%;left:6px;right:6px;height:1px}
+.bubble{position:absolute;width:12px;height:12px;left:50%;top:50%;margin:-6px 0 0 -6px;background:#cfe3b0;z-index:1}
+.hint{flex:1;min-width:0;font-size:.8rem;color:var(--muted);line-height:1.5}
+.hint b{color:var(--fg);font-weight:700}
+.deg{font-family:var(--display);color:var(--fg);font-variant-numeric:tabular-nums}
+@media (max-width:460px){.hud{grid-template-columns:1fr}.stats{justify-content:space-between}.stat{min-width:0;flex:1}h1{font-size:1.35rem}}
+@media (prefers-reduced-motion:reduce){.glow{animation:none}}
+</style>
+
+<div class="app">
+  <header class="hud">
+    <h1>バターまわし</h1>
+    <div class="stats">
+      <div class="stat"><span class="lab">行き渡り</span><span class="val" id="cov">0%</span><div class="bar"><i id="covBar"></i></div></div>
+      <div class="stat"><span class="lab">バター残り</span><span class="val" id="left">100%</span><div class="bar left"><i id="leftBar" style="width:100%"></i></div></div>
+      <div class="stat"><span class="lab">タイム</span><span class="val" id="time">0:00.0</span><div class="bar" style="background:transparent"></div></div>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="glow" id="glow"></div>
+    <div class="tilt" id="tilt"><canvas id="cv"></canvas></div>
+    <div class="overlay" id="overlay">
+      <div class="card" id="card">
+        <h2>四角いバターをひとつ</h2>
+        <p>熱したフライパンに落として、前後左右に傾けて全体に行き渡らせます。通ったマスにはバターが薄く残るので、量には限りがあります。</p>
+        <p class="sub" id="best"></p>
+        <div><button id="startBtn">バターを落とす</button></div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <div class="level" aria-label="傾き"><div class="bubble" id="bubble"></div></div>
+    <div class="hint"><b>ドラッグ</b>・<b>矢印キー</b>・<b>スマホの傾き</b>で操作　<span class="deg" id="deg">0°</span><br><button class="link" id="gyroBtn">傾きセンサーを使う</button></div>
+    <button class="ghost" id="resetBtn">やり直す</button>
+  </footer>
+</div>
+
+<script>
+(()=>{
+const G=21, C=10, R=10.45, HL=8;          // pan grid, center, radius, handle length
+const OX=1, OY=1, W=G+2, HT=G+2+HL;       // canvas in cells: rim on all sides, handle below
+const N=G*G;
+const mask=new Uint8Array(N); let panCells=0;
+for(let y=0;y<G;y++)for(let x=0;x<G;x++){if((x-C)**2+(y-C)**2<=R*R){mask[y*G+x]=1;panCells++;}}
+const rim=[]; // pan wall bits
+for(let y=-1;y<=G;y++)for(let x=-1;x<=G;x++){const d=Math.hypot(x-C,y-C);const inside=x>=0&&y>=0&&x<G&&y<G&&mask[y*G+x];if(!inside&&d<=R+1.1)rim.push([x,y]);}
+// handle: straight down from the bottom center. 3-bit neck, 5-bit grip with a hanging hole near the end.
+const handle=[]; const hole=[C,G+HL-2];
+for(let k=1;k<=HL;k++){const y=G+k; const half=k<=2?1:2; const end=k===HL;
+  for(let x=C-half;x<=C+half;x++){ if(end&&Math.abs(x-C)===2)continue; if(x===hole[0]&&y===hole[1])continue; handle.push([x,y]); } }
+const hash=(x,y)=>((x*73856093)^(y*19349663))>>>0;
+
+const liq=new Float32Array(N), coat=new Float32Array(N), dl=new Float32Array(N);
+const TOTAL=panCells*1.3;              // butter mass: a bit more than one film per bit
+const DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
+let solid, phase='ready', t=0, dropT=0, shake=0;
+const tilt={x:0,y:0}, target={x:0,y:0};
+let best=null; try{best=parseFloat(localStorage.getItem('butter-best'))||null}catch(e){}
+
+const $=id=>document.getElementById(id);
+const cv=$('cv'), ctx=cv.getContext('2d'), stage=$('stage'), tiltEl=$('tilt'), glow=$('glow');
+let s=16, dpr=1;
+
+function reset(){
+  liq.fill(0); coat.fill(0);
+  solid={x:C,y:C,vx:0,vy:0,m:TOTAL};
+  t=0; dropT=0; phase='ready'; shake=0;
+  showCard('start');
+}
+function fmt(sec){const m=Math.floor(sec/60), r=sec-m*60; return m+':'+(r<10?'0':'')+r.toFixed(1);}
+function showCard(kind,info){
+  const card=$('card'); $('overlay').hidden=false;
+  if(kind==='start'){
+    card.innerHTML=`<h2>四角いバターをひとつ</h2><p>熱したフライパンに落として、前後左右に傾けて全体に行き渡らせます。通ったマスにはバターが薄く残るので、量には限りがあります。</p>${best?`<p class="sub">ベスト ${fmt(best)}</p>`:''}<div><button id="startBtn">バターを落とす</button></div>`;
+    $('startBtn').onclick=drop;
+  }else if(kind==='win'){
+    card.innerHTML=`<h2>全体に行き渡った</h2><div class="big">${fmt(info.time)}</div><p class="sub">${info.newBest?'ベスト更新':'ベスト '+fmt(best)}　・　バター残り ${info.left}%</p><div><button id="againBtn">もう一度</button></div>`;
+    $('againBtn').onclick=()=>{reset();drop();};
+  }else{
+    card.innerHTML=`<h2>バターが足りない</h2><div class="big">${info.cov}%</div><p>流しすぎると端にたまって無駄になります。少しずつ傾けて、塗っていないマスへ運びましょう。</p><div><button id="againBtn">もう一度</button></div>`;
+    $('againBtn').onclick=()=>{reset();drop();};
+  }
+  const b=card.querySelector('button'); if(b) b.focus({preventScroll:true});
+}
+function drop(){ $('overlay').hidden=true; phase='drop'; dropT=0; }
+
+// ---------- input ----------
+const keys=new Set(); let dragging=false, dragVec={x:0,y:0};
+const KMAP={ArrowLeft:[-1,0],KeyA:[-1,0],ArrowRight:[1,0],KeyD:[1,0],ArrowUp:[0,-1],KeyW:[0,-1],ArrowDown:[0,1],KeyS:[0,1]};
+addEventListener('keydown',e=>{
+  if(KMAP[e.code]){keys.add(e.code);e.preventDefault();}
+  if(e.code==='KeyR'){reset();}
+  if((e.code==='Space'||e.code==='Enter')&&phase==='ready'&&document.activeElement.tagName!=='BUTTON'){drop();}
+});
+addEventListener('keyup',e=>keys.delete(e.code));
+addEventListener('blur',()=>keys.clear());
+const PCX=OX+C+0.5, PCY=OY+C+0.5;          // pan center inside the canvas, in cells
+function panCenter(){const r=stage.getBoundingClientRect();return{x:r.left+r.width/2+(PCX-W/2)*s,y:r.top+r.height/2+(PCY-HT/2)*s,rad:(R+1)*s};}
+function setDrag(e){const p=panCenter();let x=(e.clientX-p.x)/p.rad,y=(e.clientY-p.y)/p.rad;const l=Math.hypot(x,y);if(l>1){x/=l;y/=l;}dragVec={x,y};}
+stage.addEventListener('pointerdown',e=>{if(e.target.closest('.card'))return;dragging=true;stage.setPointerCapture(e.pointerId);setDrag(e);});
+stage.addEventListener('pointermove',e=>{if(dragging)setDrag(e);});
+const endDrag=()=>{dragging=false;dragVec={x:0,y:0};};
+stage.addEventListener('pointerup',endDrag);stage.addEventListener('pointercancel',endDrag);
+$('resetBtn').onclick=()=>reset();
+
+// phone tilt (DeviceOrientation). Neutral pose = how the phone is held when the sensor turns on.
+let gyro=null, gyroBase=null, gyroVec={x:0,y:0}, gyroOn=false;
+function onOrient(e){
+  if(e.beta==null||e.gamma==null)return;
+  if(!gyroBase){gyroBase={b:e.beta,g:e.gamma};}
+  let gx=(e.gamma-gyroBase.g)/22, gy=(e.beta-gyroBase.b)/22;
+  const ang=((screen.orientation&&screen.orientation.angle)||window.orientation||0)*Math.PI/180;
+  const x=gx*Math.cos(ang)+gy*Math.sin(ang), y=-gx*Math.sin(ang)+gy*Math.cos(ang);
+  let l=Math.hypot(x,y); gyroVec=l>1?{x:x/l,y:y/l}:{x,y};
+  if(!gyroOn){gyroOn=true;setGyroLabel('傾きセンサー ON（タップで水平を再設定）');}
+}
+function setGyroLabel(txt){$('gyroBtn').textContent=txt;}
+async function enableGyro(){
+  if(gyroOn){gyroBase=null;return;}                // already on: recalibrate
+  if(typeof DeviceOrientationEvent==='undefined'){setGyroLabel('この端末は傾きセンサー非対応');return;}
+  try{
+    if(typeof DeviceOrientationEvent.requestPermission==='function'){
+      const r=await DeviceOrientationEvent.requestPermission(); if(r!=='granted'){setGyroLabel('センサーの許可がありません');return;}
+    }
+    addEventListener('deviceorientation',onOrient);
+    setGyroLabel('スマホを傾けてみて…');
+    setTimeout(()=>{if(!gyroOn)setGyroLabel('センサーの値が届きません（自分のサイトで開くと動きます）');},1500);
+  }catch(err){setGyroLabel('センサーを使えません（自分のサイトで開くと動きます）');}
+}
+$('gyroBtn').onclick=enableGyro;
+
+function readTarget(){
+  if(dragging){target.x=dragVec.x;target.y=dragVec.y;return;}
+  if(gyroOn&&keys.size===0){target.x=gyroVec.x;target.y=gyroVec.y;return;}
+  let x=0,y=0; keys.forEach(k=>{x+=KMAP[k][0];y+=KMAP[k][1];});
+  const l=Math.hypot(x,y); if(l>0){x/=l;y/=l;} target.x=x;target.y=y;
+}
+
+// ---------- simulation ----------
+const K=5.2, D=1.3, DEP=3.2;
+function stepLiquid(h){
+  dl.fill(0);
+  for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+    const i=y*G+x; const L=liq[i]; if(L<1e-6||!mask[i])continue;
+    const mob=coat[i]>=1?1:0.5;
+    const f=[0,0,0,0]; let sum=0;
+    for(let k=0;k<4;k++){
+      const nx=x+DIRS[k][0], ny=y+DIRS[k][1];
+      if(nx<0||ny<0||nx>=G||ny>=G)continue; const j=ny*G+nx; if(!mask[j])continue;
+      const g=DIRS[k][0]*tilt.x+DIRS[k][1]*tilt.y;
+      let v=K*Math.max(0,g)*L*mob;
+      if(L>0.28&&liq[j]<L) v+=D*(L-liq[j])*mob;   // a thick puddle slumps outward; a thin film holds
+      f[k]=v*h; sum+=f[k];
+    }
+    const sc=sum>L*0.45?(L*0.45)/sum:1;
+    for(let k=0;k<4;k++){ if(!f[k])continue; const j=(y+DIRS[k][1])*G+(x+DIRS[k][0]); const a=f[k]*sc; dl[i]-=a; dl[j]+=a; }
+  }
+  for(let i=0;i<N;i++){
+    if(!mask[i])continue; liq[i]+=dl[i];
+    if(coat[i]<1&&liq[i]>0){ let a=Math.min(liq[i],DEP*h*(0.3+liq[i]),1-coat[i]); coat[i]+=a; liq[i]-=a; if(coat[i]>0.985){liq[i]=Math.max(0,liq[i]-(1-coat[i]));coat[i]=1;} }
+  }
+}
+function stepSolid(dt){
+  if(solid.m<=0)return;
+  const mag=Math.hypot(tilt.x,tilt.y);
+  if(mag>0.2){solid.vx+=tilt.x*16*dt;solid.vy+=tilt.y*16*dt;}
+  const fr=Math.exp(-(mag>0.2?2.2:7)*dt); solid.vx*=fr; solid.vy*=fr;
+  solid.x+=solid.vx*dt; solid.y+=solid.vy*dt;
+  const dx=solid.x-C, dy=solid.y-C, d=Math.hypot(dx,dy), lim=R-0.75;
+  if(d>lim){const nx=dx/d,ny=dy/d;solid.x=C+nx*lim;solid.y=C+ny*lim;const vr=solid.vx*nx+solid.vy*ny;if(vr>0){solid.vx-=vr*nx*1.4;solid.vy-=vr*ny*1.4;}}
+  const speed=Math.hypot(solid.vx,solid.vy);
+  const melt=Math.min(solid.m,(TOTAL/24)*dt*(1+speed*0.35));
+  solid.m-=melt; if(solid.m<TOTAL*0.003){liqAt(solid.x,solid.y,solid.m);solid.m=0;}
+  liqAt(solid.x,solid.y,melt);
+}
+function liqAt(x,y,a){let cx=Math.round(x),cy=Math.round(y);let i=cy*G+cx;if(!mask[i]){cx=C;cy=C;i=cy*G+cx;}liq[i]+=a;}
+
+let covCount=0, liqTotal=0;
+function measure(){
+  covCount=0; liqTotal=0; let need=0;
+  for(let i=0;i<N;i++){if(!mask[i])continue; if(coat[i]>=1)covCount++; else need+=1-coat[i]; liqTotal+=liq[i];}
+  return need;
+}
+function update(dt){
+  readTarget();
+  const e=Math.min(1,dt*6); tilt.x+=(target.x-tilt.x)*e; tilt.y+=(target.y-tilt.y)*e;
+  if(phase==='drop'){
+    dropT+=dt;
+    if(dropT>=0.6){phase='play';shake=1;const ci=C*G+C;liq[ci]+=TOTAL*0.04;solid.m-=TOTAL*0.04;}
+  }
+  if(phase==='play'){
+    t+=dt; stepSolid(dt);
+    for(let k=0;k<3;k++)stepLiquid(dt/3);
+    const need=measure();
+    if(covCount>=panCells){phase='win';const nb=!best||t<best;if(nb){best=t;try{localStorage.setItem('butter-best',String(t))}catch(e){}}
+      showCard('win',{time:t,newBest:nb,left:Math.round((liqTotal+solid.m)/TOTAL*100)});}
+    else if(solid.m<=0&&liqTotal+1e-3<need){phase='fail';showCard('fail',{cov:Math.floor(covCount/panCells*100)});}
+  } else measure();
+  shake=Math.max(0,shake-dt*4);
+}
+
+// ---------- render ----------
+const IRON=[38,37,42], TOAST=[122,92,34], BUT=[255,210,74], CREAM=[255,242,190];
+const mix=(a,b,k)=>`rgb(${a[0]+(b[0]-a[0])*k|0},${a[1]+(b[1]-a[1])*k|0},${a[2]+(b[2]-a[2])*k|0})`;
+function resize(){
+  const r=stage.getBoundingClientRect();
+  s=Math.max(6,Math.floor(Math.min(r.width/W,r.height/HT)));
+  dpr=Math.min(2,devicePixelRatio||1);
+  cv.width=W*s*dpr; cv.height=HT*s*dpr; cv.style.width=W*s+'px'; cv.style.height=HT*s+'px';
+  tiltEl.style.transformOrigin=`${PCX*s}px ${PCY*s}px`;
+  const gs=(R+1)*s*3.2;
+  glow.style.width=glow.style.height=gs+'px';
+  glow.style.transform=`translate(0px,${(PCY-HT/2)*s}px)`;
+}
+addEventListener('resize',resize);
+
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function draw(time){
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W*s,HT*s);
+  ctx.setTransform(dpr,0,0,dpr,OX*s*dpr,OY*s*dpr);
+  const gap=Math.max(1,Math.round(s*0.09)), cs=s-gap;
+  // handle: same iron bits as the pan floor
+  for(const [x,y] of handle){const v=(hash(x,y)%7)/7*0.06;ctx.fillStyle=mix(IRON,TOAST,v*0.2);ctx.fillRect(x*s+gap/2,y*s+gap/2,cs,cs);}
+  // rim
+  for(const [x,y] of rim){ctx.fillStyle=(hash(x,y)%3===0)?'#1c1b1f':'#17161a';ctx.fillRect(x*s+gap/2,y*s+gap/2,cs,cs);}
+  // floor bits
+  for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+    const i=y*G+x; if(!mask[i])continue;
+    const px=x*s+gap/2, py=y*s+gap/2;
+    const v=(hash(x,y)%7)/7*0.06;
+    ctx.fillStyle=mix(IRON,TOAST,Math.min(1,coat[i])*0.85+v*0.2);
+    ctx.fillRect(px,py,cs,cs);
+    if(coat[i]>=1){ctx.fillStyle='rgba(255,220,120,.10)';ctx.fillRect(px,py,cs,Math.max(1,cs*0.18));}
+    const L=liq[i];
+    if(L>0.004){
+      const a=Math.min(1,0.25+L*1.4);
+      ctx.fillStyle=L>1.2?mix(BUT,CREAM,Math.min(1,(L-1.2)/2)):`rgba(255,210,74,${a.toFixed(3)})`;
+      ctx.fillRect(px,py,cs,cs);
+      if(L>0.35){ctx.fillStyle='rgba(255,250,225,.55)';const q=Math.max(1,Math.round(cs*0.22));ctx.fillRect(px+q*0.6,py+q*0.6,q,q);}
+      if(L>0.12&&!reduce&&Math.random()<0.045*Math.min(1,L*2)){ // sizzle
+        ctx.fillStyle='rgba(255,255,255,.8)';const q=Math.max(1,Math.round(cs*0.2));
+        ctx.fillRect(px+Math.random()*(cs-q),py+Math.random()*(cs-q),q,q);
+      }
+    }
+  }
+  // solid butter
+  if(solid&&solid.m>0&&phase!=='ready'){
+    let sc=0.45+0.55*Math.sqrt(solid.m/TOTAL), lift=0;
+    if(phase==='drop'){const k=Math.min(1,dropT/0.6);lift=(1-k*k)*s*6;sc*=1+(1-k)*1.6;}
+    const size=cs*sc, cx=(solid.x+0.5)*s, cy=(solid.y+0.5)*s;
+    if(lift>0){ctx.fillStyle='rgba(0,0,0,.35)';ctx.fillRect(cx-size/2,cy-size/2+2,size,size);}
+    const x0=cx-size/2, y0=cy-size/2-lift, e=Math.max(1,Math.round(size*0.16));
+    ctx.fillStyle='#d9a91f'; ctx.fillRect(x0,y0+e,size,size-e+e*0.4);      // side
+    ctx.fillStyle='#fff0b3'; ctx.fillRect(x0,y0,size,size-e);              // top
+    ctx.fillStyle='#fffbe6'; ctx.fillRect(x0+e,y0+e*0.7,e,e);              // glint
+  }
+}
+
+function hud(){
+  const cov=Math.floor(covCount/panCells*100);
+  $('cov').textContent=cov+'%'; $('covBar').style.width=(covCount/panCells*100)+'%';
+  const left=Math.max(0,Math.round((liqTotal+(solid?solid.m:0))/TOTAL*100));
+  $('left').textContent=left+'%'; $('leftBar').style.width=left+'%';
+  $('time').textContent=fmt(t);
+  const deg=Math.round(Math.hypot(tilt.x,tilt.y)*14);
+  $('deg').textContent=deg+'°';
+  $('bubble').style.transform=`translate(${-tilt.x*16}px,${-tilt.y*16}px)`;
+  const sx=shake&&!reduce?(Math.random()-.5)*shake*6:0, sy=shake&&!reduce?(Math.random()-.5)*shake*6:0;
+  tiltEl.style.transform=`translate(${sx}px,${sy}px) rotateX(${-tilt.y*14}deg) rotateY(${tilt.x*14}deg)`;
+}
+
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  update(dt); draw(now); hud();
+  requestAnimationFrame(loop);
+}
+resize(); reset(); requestAnimationFrame(loop);
+})();
+</script>
